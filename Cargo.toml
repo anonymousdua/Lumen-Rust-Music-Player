@@ -1,0 +1,48 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/lumen-core",
+    "crates/lumen-audio",
+    "crates/lumen-library",
+    "crates/lumen-lyrics",
+    "crates/lumen-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+lumen-core = { path = "crates/lumen-core" }
+lumen-audio = { path = "crates/lumen-audio" }
+lumen-library = { path = "crates/lumen-library" }
+lumen-lyrics = { path = "crates/lumen-lyrics" }
+
+# UI. Pinned to an exact crates.io release (see README "Pinned versions").
+gpui = { version = "=0.2.2", default-features = false, features = ["windows-manifest"] }
+
+[profile.release]
+# Whole-program optimisation for the shipped binary (slower to build).
+lto = "fat"
+codegen-units = 1
+# Panics in background threads are caught (unwinding), never aborted.
+panic = "unwind"
+
+# Day-to-day optimised builds without the long link: `cargo build --profile fast`.
+[profile.fast]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+
+# Local patch of gpui 0.2.2: bundled fonts can be used as font fallbacks on
+# Windows. See vendor/PATCHES.md for the exact diff and why.
+[patch.crates-io]
+gpui = { path = "vendor/gpui" }
+
+[workspace.lints.rust]
+unsafe_code = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"

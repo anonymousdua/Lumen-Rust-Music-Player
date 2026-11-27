@@ -1,0 +1,30 @@
+// Windows resources for lumen.exe: the app icon (ID 1, which GPUI loads
+// for the window) and version information.
+#include <winres.h>
+
+1 ICON "../../../assets/lumen.ico"
+
+1 VERSIONINFO
+FILEVERSION     0,1,0,0
+PRODUCTVERSION  0,1,0,0
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName", "Lumen"
+      VALUE "FileDescription", "Lumen music player"
+      VALUE "FileVersion", "0.1.0"
+      VALUE "InternalName", "lumen"
+      VALUE "OriginalFilename", "lumen.exe"
+      VALUE "ProductName", "Lumen"
+      VALUE "ProductVersion", "0.1.0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END
