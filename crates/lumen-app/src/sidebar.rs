@@ -1,4 +1,5 @@
-//! Left sidebar: search box, library navigation, settings and the status box.
+//! Left sidebar: search box, library navigation, the "For you" mixes,
+//! settings and the status box.
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
@@ -6,9 +7,12 @@ use gpui::{
     StatefulInteractiveElement, Styled, div, px,
 };
 
+use lumen_reco::{AnalysisStatus, MixKind};
+
 use crate::app::{LumenApp, Screen};
 use crate::assets::Icon;
 use crate::library_model::LibraryModel;
+use crate::playlists::PlaylistSel;
 use crate::theme::Theme;
 use crate::ui::{FontExt, format_ago, format_count, icon, now_ms, section_label};
 
@@ -44,9 +48,63 @@ pub fn render(app: &LumenApp, t: &Theme, cx: &mut Context<LumenApp>) -> impl Int
             }
             div().flex().flex_col().gap(px(2.)).children(items)
         })
+        .when(app.reco_on(), |d| {
+            let mut links = Vec::with_capacity(MixKind::ALL.len());
+            for kind in MixKind::ALL {
+                let on =
+                    active == Screen::Playlists && app.playlists.selected == PlaylistSel::Mix(kind);
+                links.push(mix_link(kind, on, t, cx));
+            }
+            d.child(
+                div()
+                    .pt(px(20.))
+                    .pb(px(6.))
+                    .px(px(12.))
+                    .child(section_label("For you", t.text_muted)),
+            )
+            .child(div().flex().flex_col().gap(px(2.)).children(links))
+        })
         .child(div().flex_1())
         .child(nav_item(Screen::Settings, active, t, cx))
-        .child(status_box(library, t))
+        .child(status_box(
+            library,
+            app.reco_on().then(|| app.reco.status()).flatten(),
+            t,
+        ))
+}
+
+/// A "For you" link: opens the mix on the Playlists screen.
+fn mix_link(
+    kind: MixKind,
+    active: bool,
+    t: &Theme,
+    cx: &mut Context<LumenApp>,
+) -> impl IntoElement + use<> {
+    let (fg, bg) = if active {
+        (t.accent, t.accent_bg)
+    } else {
+        (t.text_2, gpui::transparent_black())
+    };
+    let hover_bg = t.nav_hover;
+    div()
+        .id(match kind {
+            MixKind::LateNight => "nav-late-night",
+            MixKind::Rediscover => "nav-rediscover",
+        })
+        .flex()
+        .flex_row()
+        .items_center()
+        .h(px(40.))
+        .px(px(12.))
+        .rounded(px(8.))
+        .bg(bg)
+        .when(!active, move |d| d.hover(move |s| s.bg(hover_bg)))
+        .text_color(fg)
+        .text_size(px(14.))
+        .when(active, |d| d.font_weight(FontWeight::MEDIUM))
+        .cursor_pointer()
+        .on_click(cx.listener(move |this, _event, _window, cx| this.open_mix(kind, cx)))
+        .child(kind.name())
 }
 
 /// "Search library": typing filters the current screen, Enter jumps to
@@ -110,7 +168,11 @@ fn nav_item(
 }
 
 /// Library summary: live track count, and scan progress or the last scan time.
-fn status_box(lib: &LibraryModel, t: &Theme) -> impl IntoElement + use<> {
+fn status_box(
+    lib: &LibraryModel,
+    analysis: Option<AnalysisStatus>,
+    t: &Theme,
+) -> impl IntoElement + use<> {
     let tracks = lib.stats.tracks;
     let first = if lib.open_error.is_some() {
         "Library unavailable".to_string()
@@ -131,6 +193,12 @@ fn status_box(lib: &LibraryModel, t: &Theme) -> impl IntoElement + use<> {
                 format_count(total as u64)
             )
         }
+    } else if let Some(a) = analysis.filter(|a| a.running) {
+        format!(
+            "Analyzing sound… {} / {}",
+            format_count(a.done as u64),
+            format_count(a.total as u64)
+        )
     } else if lib.folders.is_empty() {
         "Add a music folder in Settings".to_string()
     } else {

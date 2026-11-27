@@ -15,6 +15,30 @@ pub struct Settings {
     pub audio: AudioSettings,
     pub library: LibrarySettings,
     pub lyrics: LyricsSettings,
+    pub reco: RecoSettings,
+}
+
+/// Settings › Recommendations, plus the transport bar's Radio toggle.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RecoSettings {
+    /// "On-device recommendations". Off hides every recommendation element,
+    /// stops analysis and stops recording listening history.
+    pub enabled: bool,
+    /// "Count skips as dislikes" (skipped within 30 seconds).
+    pub skips_as_dislikes: bool,
+    /// Radio: keep the queue going with similar songs when it runs out.
+    pub radio: bool,
+}
+
+impl Default for RecoSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            skips_as_dislikes: true,
+            radio: false,
+        }
+    }
 }
 
 /// Settings › Audio output.

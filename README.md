@@ -5,7 +5,8 @@
 Lumen plays your local music library with bit-perfect sound and time-synced
 lyrics. It has a GPU-accelerated interface built with [GPUI](https://www.gpui.rs/),
 the UI framework behind the Zed editor. It never touches the network: no
-accounts, no telemetry, no update checks, no recommendations. Just your files.
+accounts, no telemetry, no update checks. Its recommendations are computed on
+your PC from the sound of your files and what you play.
 
 > Lumen was built entirely with **[Claude Code](https://claude.com/claude-code)**,
 > Anthropic's AI coding agent, working from a written design brief one batch
@@ -66,6 +67,19 @@ accounts, no telemetry, no update checks, no recommendations. Just your files.
 - **Smart playlists**: Hi-res only, Most played (top 50), Recently added
   (30 days), Missing lyrics.
 
+### Recommendations (on-device)
+- Every track's sound is analyzed with [bliss-rs](https://github.com/Polochon-street/bliss-rs)
+  (tempo, timbre, loudness, harmony) in the background, at the lowest thread
+  priority, so playback never stutters. About 190 tracks a minute.
+- Combined with what you actually play: completions, skips (optional) and
+  which songs you play in the same session. Nothing leaves your PC.
+- **Play similar** on any song, album or artist; **More like this** on Now
+  Playing; **Radio** keeps the queue going with similar songs.
+- **Made for you** mixes: **Late-night mix** (what you play after 9 pm,
+  leaning calmer) and **Rediscover** (favourites you haven't heard in 60 days).
+- Varied by design: at most 2 songs by one artist in any 10, never the same
+  album twice in a row.
+
 ### Windows integration
 - Media keys and the Windows media overlay (title, artist, cover, position)
   through System Media Transport Controls.
@@ -100,6 +114,8 @@ Measured on the release build against the targets in the brief:
 | Near-zero CPU when idle | 0.5–0.9% of one core, which is GPUI's vsync floor; Lumen itself does no work |
 | No dropouts under load | 0 underruns during a 10,000-track scan plus 60 window resizes |
 | Animated lyrics | 4.4% (line-synced) and 6.1% (word-by-word) of one core |
+| Recommendations under 5 ms (10,000 tracks) | Play similar 2.4 ms, Radio 2.7 ms, Late-night mix 4.4 ms |
+| Sound analysis | 899 tracks in 4 min 47 s (188 per minute, 4 background threads) |
 
 ## How it was made with Claude
 
@@ -116,7 +132,7 @@ recommendation system), the crate architecture, every screen's colours,
 type, spacing and layout, the audio and lyrics behaviour, and performance
 targets. It's kept unchanged in [`docs/SPEC.md`](docs/SPEC.md).
 
-**2. Small batches.** The work was split into eight batches. Each prompt asked
+**2. Small batches.** The work was split into nine batches. Each prompt asked
 Claude to do only that batch, then stop and report what it built, exactly how
 to test it, and its known issues.
 
@@ -130,8 +146,9 @@ to test it, and its known issues.
 | 5 | Lyrics parser and index, animated lyrics panel, full-screen lyrics, word highlighting |
 | 6 | User and smart playlists, .m3u8 import/export, the rest of Settings |
 | 7 | Performance pass with measurements, crash logs, app icon, release profile, installer script |
+| 8 | On-device recommendations: bliss-rs analysis, listening history, scoring, mixes, Radio, Play similar |
 
-**3. Verify, don't assume.** Claude wrote tests alongside the code (116 of
+**3. Verify, don't assume.** Claude wrote tests alongside the code (149 of
 them, including bit-exact checks that exclusive-mode output matches the
 source samples) and kept `cargo clippy -D warnings` and `cargo fmt` clean
 after every batch. It measured performance on the release build instead of
@@ -231,6 +248,7 @@ cargo run -p lumen-audio --example make_fixtures               # test files in t
 | `crates/lumen-audio` | Audio engine: decoding, WASAPI exclusive/shared output, gapless queue, ReplayGain, `lumen-play` |
 | `crates/lumen-library` | Scanning, tags, covers, SQLite with migrations, folder watching, collation, playlists, smart playlists, .m3u8 |
 | `crates/lumen-lyrics` | LRC (standard, enhanced, offset) and embedded lyrics, with a time-to-line/word index |
+| `crates/lumen-reco` | Recommendations: bliss-rs analysis pool, vector index, listening history, scoring and diversity rules, mixes |
 | `crates/lumen-app` | The GPUI app: window, theme, screens, player bridge, media controls (the only crate that uses GPUI) |
 | `assets/` | Bundled fonts, Lucide icons and the app icon |
 | `licenses/` | Licences for the bundled fonts (OFL) and icons (ISC) |
@@ -256,6 +274,7 @@ cargo run -p lumen-audio --example make_fixtures               # test files in t
 | `image` | =0.25.10 | Decoding covers and writing thumbnails |
 | `icu_collator`, `icu_normalizer` | =2.4.0 | Unicode collation with storable sort keys; accent-insensitive search |
 | `crossbeam-channel`, `tracing`, `serde`, `toml`, `unicode-segmentation`, `raw-window-handle`, `futures` | see `Cargo.toml` | Channels, logging, settings, text editing, window handle, async bridge |
+| `bliss-audio` | =0.13.0, FFmpeg off, Symphonia decoders | Sound analysis for recommendations. **GPL-3.0-only**: a Lumen build that includes it must be distributed under the GPL-3.0 |
 | `flacenc` | =0.5.1 | Dev-only: writes FLAC test fixtures |
 
 ## Fonts

@@ -5,6 +5,7 @@ members = [
     "crates/lumen-audio",
     "crates/lumen-library",
     "crates/lumen-lyrics",
+    "crates/lumen-reco",
     "crates/lumen-app",
 ]
 
@@ -19,6 +20,7 @@ lumen-core = { path = "crates/lumen-core" }
 lumen-audio = { path = "crates/lumen-audio" }
 lumen-library = { path = "crates/lumen-library" }
 lumen-lyrics = { path = "crates/lumen-lyrics" }
+lumen-reco = { path = "crates/lumen-reco" }
 
 # UI. Pinned to an exact crates.io release (see README "Pinned versions").
 gpui = { version = "=0.2.2", default-features = false, features = ["windows-manifest"] }

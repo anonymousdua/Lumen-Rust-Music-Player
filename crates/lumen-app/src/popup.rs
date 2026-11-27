@@ -101,6 +101,8 @@ pub fn render(
         } => {
             out.push(positioned(at, offset_editor(app, track, offset_ms, t, cx)));
         }
+        Popup::Album { id, at } => out.push(positioned(at, album_menu(app, id, t, cx))),
+        Popup::Artist { id, at } => out.push(positioned(at, artist_menu(app, id, t, cx))),
         _ => {}
     }
     out
@@ -260,6 +262,15 @@ fn song_menu(
                     this.close_popup(cx);
                 })),
         )
+        .when(app.reco_on(), |d| {
+            d.child(
+                menu_item("ctx-similar", "Play similar", None, true, t)
+                    .on_hover(hover_off_listener(cx))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.play_similar(vec![id], id, cx);
+                    })),
+            )
+        })
         .child(playlist_row)
         .when_some(entry, |d, (pid, pos)| {
             d.child(
@@ -294,6 +305,54 @@ fn song_menu(
                     cx.notify();
                 })),
         )
+        .into_any_element()
+}
+
+/// Right-click menu on an album card: Play, Play similar.
+fn album_menu(app: &LumenApp, id: i64, t: &Theme, cx: &mut Context<LumenApp>) -> AnyElement {
+    menu_panel(t)
+        .occlude()
+        .child(
+            menu_item("album-play", "Play", None, true, t).on_click(cx.listener(
+                move |this, _, _, cx| {
+                    this.close_popup(cx);
+                    if let Some(ix) = this.album_index(id) {
+                        let list = this.library.catalog.albums[ix].tracks.clone();
+                        this.play_rows(&list, 0, false, cx);
+                    }
+                },
+            )),
+        )
+        .when(app.reco_on(), |d| {
+            d.child(
+                menu_item("album-similar", "Play similar", None, true, t)
+                    .on_click(cx.listener(move |this, _, _, cx| this.play_similar_album(id, cx))),
+            )
+        })
+        .into_any_element()
+}
+
+/// Right-click menu on an artist card: Play, Play similar.
+fn artist_menu(app: &LumenApp, id: i64, t: &Theme, cx: &mut Context<LumenApp>) -> AnyElement {
+    menu_panel(t)
+        .occlude()
+        .child(
+            menu_item("artist-play", "Play", None, true, t).on_click(cx.listener(
+                move |this, _, _, cx| {
+                    this.close_popup(cx);
+                    if let Some(ix) = this.artist_index(id) {
+                        let list = this.library.catalog.artists[ix].tracks.clone();
+                        this.play_rows(&list, 0, false, cx);
+                    }
+                },
+            )),
+        )
+        .when(app.reco_on(), |d| {
+            d.child(
+                menu_item("artist-similar", "Play similar", None, true, t)
+                    .on_click(cx.listener(move |this, _, _, cx| this.play_similar_artist(id, cx))),
+            )
+        })
         .into_any_element()
 }
 

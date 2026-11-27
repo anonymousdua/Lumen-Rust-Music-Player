@@ -1,16 +1,16 @@
 //! Now Playing: cover, title, artist, album and year, the format and output
-//! badges, Up Next, and the lyrics panel (`lyrics_view.rs`). The transport
-//! bar below it is a player bar in Transport mode.
+//! badges, Up Next, More like this, and the lyrics panel (`lyrics_view.rs`).
+//! The transport bar below it is a player bar in Transport mode.
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    Context, Div, FontWeight, InteractiveElement, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, Window, div, px,
+    Context, Div, FontWeight, InteractiveElement, IntoElement, MouseButton, MouseDownEvent,
+    ParentElement, SharedString, Stateful, StatefulInteractiveElement, Styled, Window, div, px,
 };
 use lumen_audio::OutputMode;
 use lumen_core::Track;
 
-use crate::app::LumenApp;
+use crate::app::{LumenApp, Popup};
 use crate::cover::{cover, placeholder};
 use crate::theme::Theme;
 use crate::ui::{FontExt, format_time, section_label};
@@ -105,6 +105,50 @@ fn badges(
     out
 }
 
+/// A 44px "Title · Artist   3:12" row (Up next, More like this).
+fn queue_row(id: impl Into<gpui::ElementId>, tr: &Track, t: &Theme) -> Stateful<Div> {
+    let hover = t.surface_hover;
+    div()
+        .id(id)
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(10.))
+        .h(px(44.))
+        .px(px(8.))
+        .rounded(px(8.))
+        .border_b_1()
+        .border_color(t.border_row)
+        .cursor_pointer()
+        .hover(move |s| s.bg(hover))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .text_size(px(14.))
+                .child({
+                    let text = format!("{} · {}", tr.title, tr.artist);
+                    let muted = tr.title.len()..text.len();
+                    gpui::StyledText::new(text).with_highlights([(
+                        muted,
+                        gpui::HighlightStyle {
+                            color: Some(t.text_muted),
+                            ..Default::default()
+                        },
+                    )])
+                }),
+        )
+        .child(
+            div()
+                .flex_none()
+                .tabular_nums()
+                .text_size(px(13.))
+                .text_color(t.text_3)
+                .child(format_time(tr.duration_ms / 1000)),
+        )
+}
+
 pub fn render(
     app: &mut LumenApp,
     t: &Theme,
@@ -121,6 +165,7 @@ pub fn render(
             .collect();
         (p.track().cloned(), up)
     };
+    let similar = app.more_like_this(cx);
 
     let art = match &track {
         Some(tr) => cover(
@@ -225,51 +270,41 @@ pub fn render(
                 .into_any_element(),
         })
         .when(!upcoming.is_empty(), |d| {
-            let hover = t.surface_hover;
             let mut rows = Vec::new();
             for (i, tr) in upcoming {
+                rows.push(queue_row(("up-next", i), &tr, t).on_click(cx.listener(
+                    move |this, _, _, cx| {
+                        this.player.update(cx, |p, _| p.play_index(i));
+                    },
+                )));
+            }
+            d.child(
+                div()
+                    .mt(px(32.))
+                    .mb(px(8.))
+                    .child(section_label("Up next", t.text_muted)),
+            )
+            .children(rows)
+        })
+        .when(!similar.is_empty(), |d| {
+            let mut rows = Vec::new();
+            for (k, tr) in similar.into_iter().enumerate() {
+                let id = tr.id;
                 rows.push(
-                    div()
-                        .id(("up-next", i))
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .gap(px(10.))
-                        .h(px(44.))
-                        .px(px(8.))
-                        .rounded(px(8.))
-                        .border_b_1()
-                        .border_color(t.border_row)
-                        .cursor_pointer()
-                        .hover(move |s| s.bg(hover))
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.player.update(cx, |p, _| p.play_index(i));
-                        }))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .text_size(px(14.))
-                                .child({
-                                    let text = format!("{} · {}", tr.title, tr.artist);
-                                    let muted = tr.title.len()..text.len();
-                                    gpui::StyledText::new(text).with_highlights([(
-                                        muted,
-                                        gpui::HighlightStyle {
-                                            color: Some(t.text_muted),
-                                            ..Default::default()
-                                        },
-                                    )])
-                                }),
-                        )
-                        .child(
-                            div()
-                                .flex_none()
-                                .tabular_nums()
-                                .text_size(px(13.))
-                                .text_color(t.text_3)
-                                .child(format_time(tr.duration_ms / 1000)),
+                    queue_row(("more-like", k), &tr, t)
+                        .on_click(cx.listener(move |this, _, _, cx| this.play_now(id, cx)))
+                        .on_mouse_down(
+                            MouseButton::Right,
+                            cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+                                this.popup = Some(Popup::Song {
+                                    track: id,
+                                    at: e.position,
+                                    submenu: false,
+                                    entry: None,
+                                });
+                                cx.stop_propagation();
+                                cx.notify();
+                            }),
                         ),
                 );
             }
@@ -277,7 +312,7 @@ pub fn render(
                 div()
                     .mt(px(32.))
                     .mb(px(8.))
-                    .child(section_label("Up next", t.text_muted)),
+                    .child(section_label("More like this", t.text_muted)),
             )
             .children(rows)
         });

@@ -1,5 +1,5 @@
-//! Playlists screen: the playlist list on the left (smart playlists, then
-//! yours), the selected playlist on the right with its sort, Play, and a
+//! Playlists screen: the playlist list on the left ("Made for you" mixes,
+//! smart playlists, then yours), the selected playlist on the right with its sort, Play, and a
 //! 48px-row track table. User playlists can be renamed, deleted, reordered
 //! by drag (under "Custom order"), and imported/exported as `.m3u8`.
 
@@ -15,6 +15,7 @@ use gpui::{
 };
 use lumen_core::{PlaylistSort, SortDir};
 use lumen_library::SmartPlaylist;
+use lumen_reco::MixKind;
 
 use crate::app::{LumenApp, Popup};
 use crate::assets::Icon;
@@ -33,6 +34,8 @@ const LIST_W: f32 = 260.0;
 /// Which playlist is shown.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PlaylistSel {
+    /// A "Made for you" mix (read-only).
+    Mix(MixKind),
     Smart(SmartPlaylist),
     User(i64),
 }
@@ -114,12 +117,25 @@ impl LumenApp {
         for (k, s) in SmartPlaylist::ALL.iter().enumerate() {
             self.playlists.smart_counts[k] = s.rows(&c, now).len();
         }
-        if let PlaylistSel::User(id) = self.playlists.selected
-            && !self.library.playlists.iter().any(|p| p.id == id)
-        {
+        let gone = match self.playlists.selected {
+            PlaylistSel::User(id) => !self.library.playlists.iter().any(|p| p.id == id),
+            PlaylistSel::Mix(_) => !self.reco_on(),
+            PlaylistSel::Smart(_) => false,
+        };
+        if gone {
             self.playlists.selected = PlaylistSel::Smart(SmartPlaylist::HiRes);
         }
         let mut rows: Vec<(usize, i64, usize)> = match self.playlists.selected {
+            PlaylistSel::Mix(kind) => match self.reco.mix(kind) {
+                Some(mix) => mix
+                    .tracks
+                    .iter()
+                    .filter_map(|id| c.index_of(*id))
+                    .enumerate()
+                    .map(|(pos, i)| (i, mix.generated_at, pos))
+                    .collect(),
+                None => Vec::new(),
+            },
             PlaylistSel::Smart(s) => s
                 .rows(&c, now)
                 .into_iter()
@@ -171,7 +187,7 @@ impl LumenApp {
                 .iter()
                 .find(|p| p.id == id)
                 .map(|p| (p.id, p.name.clone())),
-            PlaylistSel::Smart(_) => None,
+            PlaylistSel::Smart(_) | PlaylistSel::Mix(_) => None,
         }
     }
 
@@ -443,6 +459,34 @@ fn left_column(app: &LumenApp, t: &Theme, cx: &mut Context<LumenApp>) -> impl In
     let add_open = app.popup == Some(Popup::PlaylistAdd);
     let hover = t.button_hover;
     let mut buttons: Vec<AnyElement> = Vec::new();
+    if app.reco_on() {
+        for (k, kind) in MixKind::ALL.iter().enumerate() {
+            let kind = *kind;
+            let n = app.reco.mix(kind).map_or(0, |m| m.tracks.len());
+            buttons.push(
+                list_button(
+                    ("mix-pl", k),
+                    kind.name(),
+                    format!("Made for you · {}", plural(n as u64, "track")),
+                    app.playlists.selected == PlaylistSel::Mix(kind),
+                    false,
+                    t,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.select_playlist(PlaylistSel::Mix(kind), cx)
+                }))
+                .into_any_element(),
+            );
+        }
+        buttons.push(
+            div()
+                .h(px(1.))
+                .my(px(6.))
+                .mx(px(8.))
+                .bg(t.border)
+                .into_any_element(),
+        );
+    }
     for (k, s) in SmartPlaylist::ALL.iter().enumerate() {
         let s = *s;
         let sel = app.playlists.selected == PlaylistSel::Smart(s);
@@ -587,7 +631,7 @@ fn row(
     let accent_border = t.accent_border;
     let user = match app.playlists.selected {
         PlaylistSel::User(pid) => Some(pid),
-        PlaylistSel::Smart(_) => None,
+        PlaylistSel::Smart(_) | PlaylistSel::Mix(_) => None,
     };
     let title: SharedString = track.title.clone().into();
     let cell = |w: Option<f32>, grow: f32| {
@@ -751,7 +795,12 @@ fn right_column(
 ) -> impl IntoElement + use<> {
     let l = app.settings.library.clone();
     let user = app.selected_user();
+    let mix = match app.playlists.selected {
+        PlaylistSel::Mix(k) => Some(k),
+        _ => None,
+    };
     let (kind, name) = match app.playlists.selected {
+        PlaylistSel::Mix(k) => ("Made for you", k.name().to_string()),
         PlaylistSel::Smart(s) => ("Smart playlist", s.name().to_string()),
         PlaylistSel::User(_) => (
             "Playlist",
@@ -839,6 +888,18 @@ fn right_column(
                 }),
             ),
         )
+        .when_some(mix, |d, kind| {
+            d.child(
+                secondary_button("pl-save-mix", None, "Save as playlist", n > 0, t).when(
+                    n > 0,
+                    |b| {
+                        b.on_click(
+                            cx.listener(move |this, _, _, cx| this.save_mix_as_playlist(kind, cx)),
+                        )
+                    },
+                ),
+            )
+        })
         .child(
             accent_button("pl-play", Some(Icon::Play), "Play", n > 0, t).when(n > 0, |b| {
                 b.on_click(cx.listener(|this, _, _, cx| {
@@ -907,19 +968,23 @@ fn right_column(
             )
         });
 
+    // The buttons move below the title when both don't fit (the mockup's
+    // header wraps the same way).
     let header = div()
         .flex()
         .flex_row()
+        .flex_wrap()
         .items_end()
         .justify_between()
-        .gap(px(20.))
+        .gap(px(16.))
         .child(
             div()
                 .flex()
                 .flex_col()
                 .gap(px(6.))
                 .flex_1()
-                .min_w_0()
+                .flex_basis(px(260.))
+                .min_w(px(260.))
                 .child(crate::ui::section_label(
                     format!("{kind} · {}", plural(n as u64, "track")),
                     t.text_muted,
@@ -993,6 +1058,7 @@ fn right_column(
                     "This playlist is empty. Right-click a song and pick Add to playlist."
                 }
                 PlaylistSel::Smart(_) => "No songs match this smart playlist yet.",
+                PlaylistSel::Mix(kind) => kind.empty_hint(),
             })
             .into_any_element()
     } else {

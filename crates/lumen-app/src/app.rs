@@ -429,6 +429,16 @@ pub enum Popup {
         submenu: bool,
         entry: Option<(i64, usize)>,
     },
+    /// Right-click menu on an album card.
+    Album {
+        id: i64,
+        at: Point<Pixels>,
+    },
+    /// Right-click menu on an artist card.
+    Artist {
+        id: i64,
+        at: Point<Pixels>,
+    },
     /// "Edit lyrics offset" for a song.
     LyricsOffset {
         track: TrackId,
@@ -463,6 +473,8 @@ pub struct LumenApp {
     /// "Reset play counts" is waiting for confirmation.
     pub confirm_reset: bool,
     pub playlists: crate::playlists::PlaylistsState,
+    /// On-device recommendations (`reco.rs`).
+    pub reco: crate::reco::RecoState,
     /// A playlist the library just created; handled at the next render
     /// (which has the window, for the rename field).
     pending_created: Option<(i64, usize, usize)>,
@@ -506,6 +518,7 @@ impl LumenApp {
             cx.new(|cx| Player::new(lib_handle, data_dir.clone(), thumbs, &settings.audio, cx));
         cx.subscribe(&player, |this, player, e: &PlayerEvent, cx| {
             if *e == PlayerEvent::Changed {
+                this.reco_player_changed(cx);
                 let now = player.read(cx).current_id();
                 if now != this.playing {
                     this.sync_lyrics_offset(cx);
@@ -580,9 +593,11 @@ impl LumenApp {
             lyrics_panel,
             confirm_reset: false,
             playlists: Default::default(),
+            reco: Default::default(),
             pending_created: None,
         };
         app.recompute();
+        app.open_reco(cx);
         app
     }
 
@@ -737,7 +752,14 @@ impl LumenApp {
                             _ => None,
                         })
                         .collect();
+                    let scan_finished = batch
+                        .iter()
+                        .any(|e| matches!(e, LibraryEvent::ScanFinished { .. }));
+                    let changed = batch
+                        .iter()
+                        .any(|e| matches!(e, LibraryEvent::Changed | LibraryEvent::FoldersChanged));
                     let applied = app.library.apply(batch);
+                    app.reco_library_events(scan_finished, changed);
                     for (id, added, missing) in created {
                         app.pending_created = Some((id, added, missing));
                     }
@@ -776,6 +798,7 @@ impl LumenApp {
                     Ok(c) => {
                         app.library.catalog = Arc::new(c);
                         app.sync_lyrics_offset(cx);
+                        app.reco_catalog_changed(cx);
                         let started = std::time::Instant::now();
                         app.recompute();
                         crate::ui::profile_log("sort and filter all screens", started);
@@ -991,6 +1014,7 @@ impl LumenApp {
     pub fn navigate(&mut self, screen: Screen, cx: &mut Context<Self>) {
         self.popup = None;
         self.confirm_reset = false;
+        self.reco.confirm_reset = false;
         if screen == Screen::Settings {
             self.player.read(cx).refresh_devices();
         }

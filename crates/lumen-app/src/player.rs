@@ -22,6 +22,7 @@ use lumen_core::{
 };
 use lumen_library::Library;
 use lumen_lyrics::{LoadOptions, Lyrics};
+use lumen_reco::{PlayRecord, Reco};
 
 use crate::smtc::{MediaButton, MediaInfo, Smtc};
 
@@ -69,6 +70,11 @@ pub struct Player {
     listened: Duration,
     last_position: Duration,
     counted: bool,
+    /// When the current track was first heard (ms since epoch), for the
+    /// listening history.
+    heard_since: Option<i64>,
+    /// Records finished plays for recommendations.
+    reco: Option<Arc<Reco>>,
     /// Last position bucket that caused a redraw (4 Hz).
     redraw_bucket: u64,
     resume_file: PathBuf,
@@ -120,6 +126,7 @@ impl Player {
             .is_none()
             .then(|| "The audio engine could not start.".to_string());
         let quit = cx.on_app_quit(|this: &mut Self, _| {
+            this.finish_play(false, true);
             this.save_resume();
             async {}
         });
@@ -141,6 +148,8 @@ impl Player {
             listened: Duration::ZERO,
             last_position: Duration::ZERO,
             counted: false,
+            heard_since: None,
+            reco: None,
             redraw_bucket: u64::MAX,
             resume_file: ResumeState::file_in(&data_dir),
             last_save: Instant::now(),
@@ -532,6 +541,10 @@ impl Player {
                     changed = true;
                 }
                 Event::TrackChanged { index, info, .. } => {
+                    // The previous track ends here: at its end (auto-advance)
+                    // or because the listener moved on.
+                    let reached_end = self.last_position + Duration::from_secs(5) >= self.total();
+                    self.finish_play(reached_end, false);
                     // Also on repeat-one: each pass is a new play.
                     self.listened = Duration::ZERO;
                     self.counted = false;
@@ -595,6 +608,7 @@ impl Player {
                     error = true;
                 }
                 Event::EndOfQueue => {
+                    self.finish_play(true, false);
                     self.position = Duration::ZERO;
                     changed = true;
                 }
@@ -638,6 +652,9 @@ impl Player {
             && position - self.last_position < Duration::from_secs(2)
         {
             self.listened += position - self.last_position;
+            if self.heard_since.is_none() {
+                self.heard_since = Some(crate::ui::now_ms() - self.listened.as_millis() as i64);
+            }
         }
         self.last_position = position;
         if self.counted {
@@ -651,6 +668,38 @@ impl Player {
             self.counted = true;
             lib.record_play(id);
         }
+    }
+
+    pub fn set_reco(&mut self, reco: Option<Arc<Reco>>) {
+        self.reco = reco;
+    }
+
+    /// Queue items' track ids (Radio and recommendations skip these).
+    pub fn queue_ids(&self) -> Vec<TrackId> {
+        self.items.iter().map(|t| t.id).collect()
+    }
+
+    /// Reports the current track's play to the listening history (once):
+    /// when the next track starts, the queue ends, or Lumen quits.
+    fn finish_play(&mut self, reached_end: bool, interrupted: bool) {
+        let Some(started_at) = self.heard_since.take() else {
+            return;
+        };
+        let (Some(reco), Some(track)) = (&self.reco, self.track()) else {
+            return;
+        };
+        if self.listened.is_zero() {
+            return;
+        }
+        reco.record(PlayRecord {
+            track: track.id,
+            started_at,
+            ended_at: crate::ui::now_ms(),
+            listened_ms: self.listened.as_millis() as u64,
+            duration_ms: self.total().as_millis() as u64,
+            reached_end,
+            interrupted,
+        });
     }
 
     /// Saves the queue, track, position, volume, shuffle and repeat.

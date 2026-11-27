@@ -103,6 +103,47 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE tracks ADD COLUMN date_modified INTEGER;
     UPDATE tracks SET date_modified = mtime;
     "#,
+    // v3: on-device recommendations (lumen-reco). Audio analysis vectors,
+    // listening history, co-play counts and the saved "Made for you" mixes.
+    r#"
+    CREATE TABLE track_analysis (
+        track_id         INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+        features         BLOB NOT NULL,      -- f32 little-endian, bliss order
+        features_version INTEGER NOT NULL,   -- bliss FeaturesVersion
+        size             INTEGER NOT NULL,   -- file size and mtime analyzed,
+        mtime            INTEGER NOT NULL,   -- to re-analyze changed files
+        analyzed_at      INTEGER NOT NULL    -- ms since epoch
+    );
+
+    CREATE TABLE play_events (
+        id          INTEGER PRIMARY KEY,
+        track_id    INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+        started_at  INTEGER NOT NULL,        -- ms since epoch
+        ended_at    INTEGER NOT NULL,
+        listened_ms INTEGER NOT NULL,
+        completed   INTEGER NOT NULL,
+        skipped     INTEGER NOT NULL,
+        session_id  INTEGER NOT NULL,        -- started_at of the session's first play
+        local_hour  INTEGER NOT NULL         -- 0-23, local time when it started
+    );
+    CREATE INDEX play_events_track ON play_events(track_id);
+    CREATE INDEX play_events_session ON play_events(session_id);
+
+    -- Unordered pairs (a < b) played in the same session.
+    CREATE TABLE coplay (
+        a     INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+        b     INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+        count INTEGER NOT NULL,
+        PRIMARY KEY (a, b)
+    ) WITHOUT ROWID;
+    CREATE INDEX coplay_b ON coplay(b);
+
+    CREATE TABLE mixes (
+        kind         TEXT PRIMARY KEY,       -- "late_night", "rediscover"
+        generated_at INTEGER NOT NULL,
+        tracks       TEXT NOT NULL           -- comma-separated track ids
+    );
+    "#,
 ];
 
 pub const SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;

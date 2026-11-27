@@ -17,6 +17,7 @@ mod player;
 mod player_bar;
 mod playlists;
 mod popup;
+mod reco;
 mod settings;
 mod sidebar;
 mod single_instance;
