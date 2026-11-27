@@ -117,6 +117,51 @@ Measured on the release build against the targets in the brief:
 | Recommendations under 5 ms (10,000 tracks) | Play similar 2.4 ms, Radio 2.7 ms, Late-night mix 4.4 ms |
 | Sound analysis | 899 tracks in 4 min 47 s (188 per minute, 4 background threads) |
 
+The cold-start figure was measured before recommendations were added. They
+load at startup too, so it needs measuring again.
+
+## Known issues
+
+**Licence not chosen yet.** Lumen's own code is meant to be MIT or Apache-2.0,
+but the sound analysis library it now includes (bliss-audio) is GPL-3.0-only.
+A build that includes it has to be distributed under the GPL-3.0. Until that's
+settled there's no LICENSE file, so don't publish release builds.
+
+**Not yet tested with real playback.** These parts are covered by unit tests,
+but haven't been tried in the app with music playing:
+
+- Recording each play as finished, skipped or partly heard.
+- Radio adding songs when the queue reaches its last one.
+- No audio dropouts while analysis runs during playback. Analysis runs at the
+  lowest background priority and audio at the highest, so it should be fine;
+  any dropouts are logged in `%LOCALAPPDATA%\Lumen\logs\lumen.log` as "audio
+  dropout".
+
+**Recommendations**
+
+- **Analysis uses at most 4 threads.** bliss decodes each whole song into
+  memory before analyzing it: about 150 MB for a 4-minute CD-quality track,
+  over 300 MB for long hi-res files. More threads would risk using several GB
+  of RAM, so large libraries analyze slowly (about 55 minutes for 10,000
+  tracks). A decoder that feeds bliss in small chunks would fix this.
+- **Pausing analysis isn't instant.** Turning recommendations off stops new
+  songs from starting, but each thread finishes the song it's on (up to about
+  a second).
+- **The Late-night mix starts as a guess.** It's meant to be built from songs
+  you play after 9 pm, but listening history only starts with this version.
+  Until there are evening plays, it uses the calmest songs you've played.
+- **Rediscover starts empty.** It needs songs with at least 2 plays that you
+  haven't heard in 60 days, so it fills in after a couple of months of use.
+
+**Other**
+
+- **The installer hasn't been built and tested.** The Inno Setup script
+  hasn't been compiled yet.
+- **Unreadable files are read again on every rescan.** Corrupt or unsupported
+  files are skipped and logged, but not remembered.
+- **No taskbar thumbnail buttons.** GPUI doesn't pass the needed window
+  messages on (see the GPUI table at the end).
+
 ## How it was made with Claude
 
 All of Lumen's own code, tests, build scripts and docs were written by
