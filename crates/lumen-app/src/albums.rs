@@ -64,6 +64,14 @@ pub fn album_card(
         .cursor_pointer()
         .hover(move |s| s.bg(hover))
         .on_click(cx.listener(move |this, _, _, cx| this.open_album(id, cx)))
+        .on_mouse_down(
+            gpui::MouseButton::Right,
+            cx.listener(move |this, e: &gpui::MouseDownEvent, _, cx| {
+                this.popup = Some(Popup::Album { id, at: e.position });
+                cx.stop_propagation();
+                cx.notify();
+            }),
+        )
         .child(cover(
             a.cover_hash.as_deref(),
             &app.library.paths.thumbs,

@@ -6,7 +6,7 @@ You are building **Lumen**, a fast, stable, offline music player for Windows 10/
 
 - **Offline only.** Lumen never makes a network request: no metadata lookups, cover-art downloads, telemetry or update checks. It only plays local files.
 - **100% Rust at runtime.** No FFmpeg, no C audio libraries, no web views. (`rusqlite` with the `bundled` feature is fine.)
-- **No recommendation system.** Do not build one, and leave out every "For you", "Made for you" or "Recommendations" element (details under "Changes from the mockup").
+- ~~**No recommendation system.**~~ **Overridden by Batch 8** (see the end of this file): Lumen has an on-device recommendation system, and the "For you", "Made for you" and "Recommendations" elements are back as the mockup shows them.
 - **Audio quality comes first.** Bit-perfect output in WASAPI exclusive mode, no needless resampling, and no dropouts while the UI is busy.
 - **The UI must match the design spec below**: colors, type, spacing, radii and layout.
 - **Work only on the batch I give you.** I'll send batches one at a time (Batch 0, then Batch 1, and so on). Do only the current batch, never anything from a later one. When it's done, stop and report: what you built, how I can test it (exact commands plus what to click), and known issues.
@@ -190,9 +190,11 @@ Placeholder art and artist avatar palette (bg / fg pairs), assigned deterministi
 
 ### Changes from the mockup (required)
 
-- Remove the sidebar's "For you" section ("Late-night mix", "Rediscover").
-- Remove the Settings "Recommendations" card. Its "Reset listening history" becomes "Reset play counts" in the Library card.
-- Remove the "Made for you" playlists. Playlists contain only user and smart playlists.
+Batch 8 reversed the first three removals: the "For you" section, the "Made for you" playlists and the Settings › Recommendations card are back, exactly as the mockup shows them. "Reset play counts" stays in the Library card as well.
+
+- ~~Remove the sidebar's "For you" section ("Late-night mix", "Rediscover").~~
+- ~~Remove the Settings "Recommendations" card. Its "Reset listening history" becomes "Reset play counts" in the Library card.~~
+- ~~Remove the "Made for you" playlists. Playlists contain only user and smart playlists.~~
 - Replace the mockup's placeholder data (artist names, lyrics, counts) with real library data. The mockup's numbers only show the format.
 
 ## Behavior requirements
@@ -232,3 +234,59 @@ Placeholder art and artist avatar palette (bg / fg pairs), assigned deterministi
    - Add the sidebar with working navigation between empty screen placeholders, and a static mini player.
 
 Then stop and report. Test: the window opens, moves, snaps and maximizes, and Hindi and Malayalam text renders correctly.
+
+## Batch 8: on-device recommendations
+
+This batch overrides two earlier rules: the "No recommendation system" rule no longer applies, and the "Changes from the mockup" removals are reversed (the "For you" sidebar section, the "Made for you" playlists and the Settings › Recommendations card come back exactly as the mockup and the design tokens describe them). Every other rule still holds: offline only, 100% Rust, no audio dropouts.
+
+### New crate: `lumen-reco`
+
+Depends on `lumen-core` and `lumen-library`, never on GPUI. Combines audio similarity (bliss-rs) with personal listening signals.
+
+### 1. Audio analysis with bliss-rs
+
+- Use `bliss-audio` with its Symphonia decoder and FFmpeg disabled; pin the version; no FFmpeg or C audio library may be linked.
+- Analyze every track in a background job after the library scan, on a low-priority pool of at most `cores − 1` threads, pausable. Analysis must never cause audio dropouts; the playback thread has priority.
+- Store each track's vector in SQLite (new migration) as a BLOB with the bliss feature-version number and the analysis date. Re-analyze when the file changes (mtime or size) or the feature version changes. Skip tracks that fail, log them, retry on the next rescan.
+- Progress in the sidebar status box ("Analyzing sound… 640 / 2,418") and in Settings.
+- Nearest-neighbour search: an in-memory index of all vectors loaded at startup, brute force (under 5 ms per query at ~10k tracks), using bliss's distance function.
+
+### 2. Listening signals (new tables via migration)
+
+- Play events: track, timestamp, time listened, completed or skipped, session id. A new session starts after 30 minutes of inactivity.
+- A song skipped within 30 s counts as a skip; skips are negatives only when "Count skips as dislikes" is on.
+- Co-play matrix: how often two tracks are played in the same session, updated incrementally.
+
+### 3. Scoring
+
+```
+score = 0.55 · audio_similarity(seed, candidate)      // 1 − normalized bliss distance
+      + 0.20 · coplay(seed, candidate)                // normalized co-play count
+      + 0.15 · affinity(candidate)                    // play count and completion rate, log-scaled
+      + 0.05 · same_artist_or_album bonus
+      − 0.25 · skip_rate(candidate)                   // only when "skips as dislikes" is on
+      − recency_penalty(candidate)                    // strong if played in the last ~2 hours
+```
+
+- Weights live in one config struct.
+- Diversity: no track already in the queue; at most 2 tracks by the same artist in any 10 recommended; never the same album back-to-back unless the seed came from that album.
+- Deterministic for a given state; a seeded RNG only breaks ties.
+
+### 4. Features
+
+- "Made for you" mixes, regenerated on launch and at most once every 6 hours:
+  - Late-night mix (24 tracks): seeded from tracks often played after 9 pm, biased toward lower tempo and loudness (bliss features).
+  - Rediscover (30 tracks): high past affinity, not played in 60+ days, each followed by its nearest neighbours.
+- Radio / endless queue: when the queue is about to run out and Radio is on, append 10 tracks seeded from the last 3 played. A Radio toggle sits in the transport bar next to repeat (accent when on).
+- "Play similar" in the Songs, Albums and Artists context menus: a 25-track queue from the selected item.
+- "MORE LIKE THIS" (5 tracks) on Now Playing, under Up Next.
+
+### 5. UI (mockup and theme tokens)
+
+- Sidebar: the "FOR YOU" section label with "Late-night mix" and "Rediscover" links that open those playlists.
+- Playlists screen: both mixes at the top, kind "Made for you · N tracks"; read-only, with "Save as playlist" to make an editable copy.
+- Settings › Recommendations card: "On-device recommendations" ("Learns from your plays, nothing leaves this PC"; off hides every recommendation element and stops analysis), "Count skips as dislikes" ("Skipped within 30 seconds"), the analysis status line with "Re-analyze library", and "Reset listening history" (confirm step; clears play events and co-play data, not the audio analysis). "Reset play counts" stays in the Library card.
+
+### 6. Tests and checks
+
+Unit tests for scoring, diversity rules, session splitting, skip detection, the recency penalty and the Late-night / Rediscover rules; a benchmark of query time with 10k synthetic vectors (under 5 ms) and analysis throughput; `cargo tree` shows no FFmpeg or ONNX dependency.

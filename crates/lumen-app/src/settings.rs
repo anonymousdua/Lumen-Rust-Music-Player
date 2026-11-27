@@ -1,5 +1,5 @@
-//! Settings screen: the Audio output, Library and Lyrics cards. Every
-//! setting is saved to `settings.toml` as soon as it changes.
+//! Settings screen: the Audio output, Library, Lyrics and Recommendations
+//! cards. Every setting is saved to `settings.toml` as soon as it changes.
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
@@ -45,8 +45,180 @@ pub fn render(app: &LumenApp, t: &Theme, cx: &mut Context<LumenApp>) -> impl Int
                 .items_start()
                 .child(audio_card(app, t, cx))
                 .child(library_card(app, t, cx))
-                .child(lyrics_card(app, t, cx)),
+                .child(lyrics_card(app, t, cx))
+                .child(reco_card(app, t, cx)),
         )
+}
+
+/// Recommendations: the two toggles, sound analysis status with
+/// "Re-analyze library", and "Reset listening history" (confirm step).
+fn reco_card(app: &LumenApp, t: &Theme, cx: &mut Context<LumenApp>) -> impl IntoElement + use<> {
+    let r = app.settings.reco.clone();
+    let status = app.reco.status();
+    let running = status.is_some_and(|s| s.running);
+    let status_line = status.filter(|_| r.enabled).map(|s| {
+        let mut line = if s.running {
+            format!(
+                "Analyzing sound… {} / {} tracks",
+                format_count(s.done as u64),
+                format_count(s.total as u64)
+            )
+        } else {
+            format!(
+                "Sound analysis: {} of {} tracks",
+                format_count(s.done as u64),
+                format_count(s.total as u64)
+            )
+        };
+        if s.failed > 0 {
+            line.push_str(&format!(
+                " · {} couldn't be analyzed (see the log)",
+                format_count(s.failed as u64)
+            ));
+        }
+        line
+    });
+
+    let reset: AnyElement = if !app.reco.confirm_reset {
+        div()
+            .flex()
+            .child(
+                crate::widgets::secondary_button(
+                    "reset-history",
+                    None,
+                    "Reset listening history",
+                    true,
+                    t,
+                )
+                .bg(gpui::transparent_black())
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.reco.confirm_reset = true;
+                    cx.notify();
+                })),
+            )
+            .into_any_element()
+    } else {
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(10.))
+            .p(px(14.))
+            .rounded(px(10.))
+            .bg(t.surface_2)
+            .border_1()
+            .border_color(t.border_input)
+            .child(
+                div()
+                    .text_size(px(13.))
+                    .line_height(px(19.))
+                    .text_color(t.text)
+                    .child(
+                        "Clear your listening history? Lumen forgets what you played, skipped                          and played together. The sound analysis and play counts stay.                          This can't be undone.",
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .gap(px(10.))
+                    .child(
+                        crate::widgets::accent_button(
+                            "reset-history-confirm",
+                            None,
+                            "Reset listening history",
+                            true,
+                            t,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.reset_listening_history(cx))),
+                    )
+                    .child(
+                        crate::widgets::secondary_button("reset-history-cancel", None, "Cancel", true, t)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.reco.confirm_reset = false;
+                                cx.notify();
+                            })),
+                    ),
+            )
+            .into_any_element()
+    };
+
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(18.))
+        .flex_1()
+        .min_w(px(380.))
+        .max_w(px(560.))
+        .p(px(20.))
+        .rounded(px(14.))
+        .bg(t.surface)
+        .border_1()
+        .border_color(t.border)
+        .child(
+            div()
+                .display_font()
+                .text_size(px(18.))
+                .line_height(px(24.))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(t.text)
+                .child("Recommendations"),
+        )
+        .child(
+            toggle(
+                "reco-toggle",
+                "On-device recommendations",
+                "Learns from your plays, nothing leaves this PC",
+                r.enabled,
+                t,
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.update_reco_settings(|r| r.enabled = !r.enabled, cx)
+            })),
+        )
+        .child(
+            toggle(
+                "skips-toggle",
+                "Count skips as dislikes",
+                "Skipped within 30 seconds",
+                r.skips_as_dislikes,
+                t,
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.update_reco_settings(|r| r.skips_as_dislikes = !r.skips_as_dislikes, cx)
+            })),
+        )
+        .when_some(status_line, |d, line| {
+            d.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(10.))
+                    .child(
+                        div()
+                            .tabular_nums()
+                            .text_size(px(12.))
+                            .line_height(px(17.))
+                            .text_color(t.text_muted)
+                            .child(line),
+                    )
+                    .child(
+                        div().flex().child(
+                            crate::widgets::secondary_button(
+                                "reanalyze",
+                                Some(Icon::Refresh),
+                                "Re-analyze library",
+                                !running,
+                                t,
+                            )
+                            .bg(gpui::transparent_black())
+                            .when(!running, |b| {
+                                b.on_click(cx.listener(|this, _, _, cx| this.reanalyze_library(cx)))
+                            }),
+                        ),
+                    ),
+            )
+        })
+        .child(reset)
 }
 
 fn library_card(app: &LumenApp, t: &Theme, cx: &mut Context<LumenApp>) -> impl IntoElement + use<> {

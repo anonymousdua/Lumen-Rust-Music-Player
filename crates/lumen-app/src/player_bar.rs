@@ -446,6 +446,13 @@ impl PlayerBar {
     fn render_transport(&mut self, t: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let p = self.player.read(cx);
         let (shuffle, repeat) = (p.shuffle, p.repeat);
+        // Radio: shown while recommendations are on.
+        let radio = self
+            .app
+            .upgrade()
+            .map(|a| a.read(cx))
+            .filter(|a| a.reco_on())
+            .map(|a| a.settings.reco.radio);
         div()
             .id("transport")
             .relative()
@@ -493,7 +500,21 @@ impl PlayerBar {
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.player.update(cx, |p, cx| p.cycle_repeat(cx));
                         })),
-                    ),
+                    )
+                    .when_some(radio, |d, on| {
+                        d.child(
+                            round_button("radio", Icon::Radio, true, on, t)
+                                .tooltip(|_, cx| {
+                                    text_tooltip("Radio: keep playing similar songs", cx)
+                                })
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    if let Some(app) = this.app.upgrade() {
+                                        app.update(cx, |a, cx| a.toggle_radio(cx));
+                                    }
+                                    cx.notify();
+                                })),
+                        )
+                    }),
             )
             .child(self.progress(t, cx))
             .child(self.volume(110., t, cx))
@@ -663,7 +684,10 @@ fn round_button(
         t.text_muted
     } else if active {
         t.accent
-    } else if matches!(glyph, Icon::Shuffle | Icon::Repeat | Icon::RepeatOne) {
+    } else if matches!(
+        glyph,
+        Icon::Shuffle | Icon::Repeat | Icon::RepeatOne | Icon::Radio
+    ) {
         t.text_3
     } else {
         t.text_2

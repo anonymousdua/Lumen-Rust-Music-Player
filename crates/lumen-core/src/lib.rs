@@ -8,7 +8,9 @@ pub mod settings;
 pub mod sort;
 
 pub use resume::ResumeState;
-pub use settings::{AudioSettings, LibrarySettings, LyricsFont, LyricsSettings, Settings};
+pub use settings::{
+    AudioSettings, LibrarySettings, LyricsFont, LyricsSettings, RecoSettings, Settings,
+};
 pub use sort::{AlbumSort, ArtistSort, PlaylistSort, SongFilter, SongSort, SortDir};
 
 /// Stable identifier of a track in the library database.

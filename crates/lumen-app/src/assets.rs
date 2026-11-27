@@ -64,6 +64,7 @@ icons! {
     More => "ellipsis.svg",
     Grip => "grip-vertical.svg",
     Smart => "sparkles.svg",
+    Radio => "radio.svg",
 }
 
 /// Serves the embedded icons to GPUI.
